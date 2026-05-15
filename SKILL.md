@@ -7,7 +7,7 @@ description: Extract, locally transcribe, optimize, and clean up Douyin/TikTok C
 
 ## Workflow
 
-Use the bundled script for the deterministic media work, then use Codex for the language-sensitive cleanup.
+Use the bundled script for the deterministic media work, then use the current agent or your own editing step for the language-sensitive cleanup.
 
 1. Run `scripts/douyin_transcribe.py` with the user's full share text.
 2. Read the generated `transcript.raw.md` and `metadata.json`. Confirm `duration_ms` is present when available and that the ASR log processed the expected duration; if the transcript is suspiciously short, re-run before cleanup.
@@ -41,7 +41,7 @@ The script prints JSON containing:
 - `metadata`: video title, id, and download URL
 - `raw_transcript`: temporary ASR transcript path
 
-The script validates ranged video downloads against the server-reported byte length before extracting audio. It deletes downloaded video and extracted audio by default. Use `--keep-media` only when the user explicitly asks to keep media or when debugging an incomplete transcript. The raw transcript and metadata are temporary handoff files for Codex; remove them after writing `transcript.optimized.md`.
+The script validates ranged video downloads against the server-reported byte length before extracting audio. It deletes downloaded video and extracted audio by default. Use `--keep-media` only when the user explicitly asks to keep media or when debugging an incomplete transcript. The raw transcript and metadata are temporary handoff files for the agent or cleanup step; remove them after writing `transcript.optimized.md`.
 
 The script configures Python stdio and subprocess decoding as UTF-8, so Windows users do not need to run Python with `-X utf8` manually.
 
