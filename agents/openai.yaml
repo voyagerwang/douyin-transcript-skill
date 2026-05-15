@@ -1,0 +1,4 @@
+interface:
+  display_name: "Douyin Transcript"
+  short_description: "Transcribe Douyin videos with local SenseVoice"
+  default_prompt: "Use $douyin-transcript to extract and optimize the transcript from this Douyin share link."
