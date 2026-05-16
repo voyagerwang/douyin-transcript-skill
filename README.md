@@ -56,6 +56,8 @@ export SENSEVOICE_PYTHON="/Library/Frameworks/Python.framework/Versions/3.13/bin
 export SENSEVOICE_REPO="/path/to/SenseVoice"   # 可选,本地 model.py 所在仓库
 export SENSEVOICE_DEVICE="cpu"                 # 可选: cpu / mps / cuda:0
 export SENSEVOICE_MODEL="iic/SenseVoiceSmall"  # 可选
+export VIDEO_TRANSCRIPT_OUTPUT_DIR="/path/to/Inbox"
+export VIDEO_TRANSCRIPT_IMAGES_DIR="/path/to/Inbox/images"
 ```
 
 检查:
@@ -119,7 +121,9 @@ python3 ~/.claude/skills/video-transcript/scripts/transcript.py "<URL>" --engine
 
 逐字稿默认**两个去处**：
 1. **stdout**：完整 Markdown 直接打印（适合 Claude Code 直接展示，或 `| pbcopy`）
-2. **落盘**：`~/.claude/skills/video-transcript/outputs/<标题>_transcript.md`
+2. **落盘**：`VIDEO_TRANSCRIPT_OUTPUT_DIR/<标题>_transcript.md`；未配置时为 `~/.claude/skills/video-transcript/outputs/`
+
+图片、封面或后续衍生图片统一放到 `VIDEO_TRANSCRIPT_IMAGES_DIR`；未配置时为输出目录下的 `images/`。
 
 格式示例：
 ```markdown
@@ -151,6 +155,7 @@ python3 ~/.claude/skills/video-transcript/scripts/transcript.py "<URL>" --engine
 | `--target-size` | 压缩目标大小 MB，默认 30 |
 | `--no-save` | 不写 .md 文件（默认会保存） |
 | `--output-dir` | 改输出目录 |
+| `--images-dir` | 改图片/封面等资产输出目录 |
 | `--engine` | `local` 或 `doubao`,默认 `local` |
 | `--language` | 本地 SenseVoice 语言,默认 `zh`,可设 `auto` |
 | `--doctor` | 体检模式：检查所有依赖+配置 |

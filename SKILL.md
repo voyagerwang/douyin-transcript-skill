@@ -110,12 +110,14 @@ python3 "$VT_HOME/scripts/transcript.py" "<URL或本地路径>"
 
 脚本会**两个去处同时输出**:
 1. **stdout 直出**完整 Markdown 全文 — 供 agent 复述给用户(见阶段 2 第 2 条强制要求)
-2. **落盘**到 `$VT_HOME/outputs/<标题>_transcript.md` — skill 自管,所有产出归一处
+2. **落盘**到 `VIDEO_TRANSCRIPT_OUTPUT_DIR` 指定目录;未设置时为 `$VT_HOME/outputs/<标题>_transcript.md`
+3. **图片资产**统一放到 `VIDEO_TRANSCRIPT_IMAGES_DIR`;未设置时为输出目录下的 `images/`
 
 如果用户要“优化后只保留最终稿”,agent 在脚本完成后应读取 Markdown,做错别字/同音词/断句修正,写回同一路径或另存 `*.optimized.md`,并删除临时 raw/中间文件。不要删除用户显式要求保留的媒体或调试文件。
 
 **取消落盘**:`--no-save`
 **改保存路径**:`--output-dir <path>`
+**改图片目录**:`--images-dir <path>`
 
 ### 评估表样例
 
@@ -173,6 +175,7 @@ python3 "$VT_HOME/scripts/transcript.py" "<URL或本地路径>"
 | `--target-size` | 压缩目标大小 MB,默认 30 |
 | `--no-save` | 不落盘 .md(默认会保存到 `$VT_HOME/outputs/`) |
 | `--output-dir` | 改保存路径 |
+| `--images-dir` | 改图片/封面等资产保存路径 |
 | `--engine` | `local` 或 `doubao`,默认 `local` |
 | `--language` | 本地 SenseVoice 语言,默认 `zh`,可设 `auto` |
 | `--doctor` | 体检模式:检查依赖+配置 |
@@ -182,5 +185,6 @@ python3 "$VT_HOME/scripts/transcript.py" "<URL或本地路径>"
 - 默认使用本地 SenseVoice/FunASR,不上传视频到云端 ASR
 - 本地模式时间戳精度为切片级/段落级(不是词级/句级),用于章节定位
 - 默认 stdout 直接输出 Markdown 全文(供上层 agent 展示);**同时**落盘
+- 若需要把输出沉淀到固定知识库目录,设置 `VIDEO_TRANSCRIPT_OUTPUT_DIR`;图片/封面等资产设置 `VIDEO_TRANSCRIPT_IMAGES_DIR`
 - 预估耗时模型(粗估):headless 启动 + 下载 + 本地 ASR,给 ±20% 范围
 - 豆包 API Key 仅 `--engine doubao` 需要,配置存在 `$VT_HOME/.env`(权限 600,gitignore),不会随仓库分发

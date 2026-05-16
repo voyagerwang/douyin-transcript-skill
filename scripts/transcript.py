@@ -54,6 +54,8 @@ def _load_dotenv(path):
 
 _load_dotenv(ENV_FILE)
 
+DEFAULT_OUTPUT_DIR = os.getenv("VIDEO_TRANSCRIPT_OUTPUT_DIR", DEFAULT_OUTPUT_DIR)
+DEFAULT_IMAGES_DIR = os.getenv("VIDEO_TRANSCRIPT_IMAGES_DIR", os.path.join(DEFAULT_OUTPUT_DIR, "images"))
 
 API_ENDPOINT = os.getenv("DOUBAO_API_ENDPOINT", "https://ark.cn-beijing.volces.com/api/v3/responses")
 API_KEY = os.getenv("DOUBAO_API_KEY") or ""
@@ -934,7 +936,7 @@ def safe_filename(name, max_len=60):
     return name[:max_len] or "transcript"
 
 
-def run(input_path, title=None, target_mb=None, output_dir=None, save_md=True, engine=DEFAULT_ENGINE, language="zh"):
+def run(input_path, title=None, target_mb=None, output_dir=None, images_dir=None, save_md=True, engine=DEFAULT_ENGINE, language="zh"):
     if not check_ffmpeg():
         print("[ERROR] ffmpeg 未安装!请运行: brew install ffmpeg", file=sys.stderr)
         sys.exit(1)
@@ -1066,12 +1068,15 @@ def run(input_path, title=None, target_mb=None, output_dir=None, save_md=True, e
     # 默认存盘到 skill 目录,同时 stdout 直出全文
     if save_md:
         out_dir = output_dir or DEFAULT_OUTPUT_DIR
+        asset_dir = images_dir or DEFAULT_IMAGES_DIR
         os.makedirs(out_dir, exist_ok=True)
+        os.makedirs(asset_dir, exist_ok=True)
         name_seed = title or Path(video_path).stem
         out_file = os.path.join(out_dir, f"{safe_filename(name_seed)}_transcript.md")
         with open(out_file, "w", encoding="utf-8") as f:
             f.write(final_md)
         print(f"\n[OK] 逐字稿已保存: {out_file}", file=sys.stderr)
+        print(f"[OK] 图片目录已就绪: {asset_dir}", file=sys.stderr)
 
     print("=" * 55, file=sys.stderr)
     print("[OK] 转录完成,完整逐字稿见 stdout", file=sys.stderr)
@@ -1185,6 +1190,8 @@ def main():
                         help="不写 .md 文件(默认会保存到 skill 目录的 outputs/)")
     parser.add_argument("--output-dir", default=None,
                         help=f"输出目录,默认 {DEFAULT_OUTPUT_DIR}")
+    parser.add_argument("--images-dir", default=None,
+                        help=f"图片/封面等资产目录,默认 {DEFAULT_IMAGES_DIR}")
     parser.add_argument("--engine", choices=["local", "doubao"], default=DEFAULT_ENGINE,
                         help="转写引擎: local=本地 SenseVoice/FunASR, doubao=豆包视频理解 API")
     parser.add_argument("--language", default=os.getenv("SENSEVOICE_LANGUAGE", "zh"),
@@ -1202,7 +1209,7 @@ def main():
         parser.error("缺少 input 参数(视频 URL 或本地文件路径)。--doctor 体检模式下可省略。")
 
     run(args.input, title=args.title, target_mb=args.target_size,
-        output_dir=args.output_dir, save_md=args.save_md,
+        output_dir=args.output_dir, images_dir=args.images_dir, save_md=args.save_md,
         engine=args.engine, language=args.language)
 
 
