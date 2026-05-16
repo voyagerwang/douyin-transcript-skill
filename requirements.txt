@@ -1,3 +1,5 @@
 funasr>=1.2.0
 torch
 torchaudio
+yt-dlp>=2024.3.10
+playwright>=1.40

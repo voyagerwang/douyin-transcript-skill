@@ -1,4 +1,4 @@
 interface:
-  display_name: "Douyin Transcript"
-  short_description: "Transcribe Douyin videos with local SenseVoice"
-  default_prompt: "Use the douyin-transcript skill from ~/.agents/skills/douyin-transcript to extract and optimize the transcript from this Douyin share link."
+  display_name: "Video Transcript"
+  short_description: "Transcribe Douyin, Bilibili, Xiaohongshu, YouTube, or local videos with local SenseVoice"
+  default_prompt: "Use the video-transcript skill to extract and optimize a local SenseVoice transcript from this video link."
