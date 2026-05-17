@@ -61,6 +61,23 @@ API_ENDPOINT = os.getenv("DOUBAO_API_ENDPOINT", "https://ark.cn-beijing.volces.c
 API_KEY = os.getenv("DOUBAO_API_KEY") or ""
 MODEL = os.getenv("DOUBAO_MODEL", "doubao-seed-2-0-pro-260215")
 DEFAULT_ENGINE = os.getenv("VIDEO_TRANSCRIPT_ENGINE", "local")
+_OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL", "")
+_EXPLICIT_MINIMAX_BASE_URL = os.getenv("MINIMAX_BASE_URL", "")
+MINIMAX_BASE_URL = _EXPLICIT_MINIMAX_BASE_URL or (
+    _OPENAI_BASE_URL if "minimax" in _OPENAI_BASE_URL.lower() else "https://api.minimax.io/v1"
+)
+_ALLOW_OPENAI_KEY_FOR_MINIMAX = (
+    "minimax" in _OPENAI_BASE_URL.lower() or "minimax" in _EXPLICIT_MINIMAX_BASE_URL.lower()
+)
+MINIMAX_API_KEY = os.getenv("MINIMAX_API_KEY") or (
+    os.getenv("OPENAI_API_KEY") if _ALLOW_OPENAI_KEY_FOR_MINIMAX else ""
+) or ""
+MINIMAX_MODEL = os.getenv("MINIMAX_MODEL", "MiniMax-M2.7")
+MINIMAX_MAX_CHARS = int(os.getenv("MINIMAX_MAX_CHARS", "2500"))
+MINIMAX_MAX_COMPLETION_TOKENS = int(os.getenv("MINIMAX_MAX_COMPLETION_TOKENS", "2048"))
+DEFAULT_OPTIMIZER = os.getenv("VIDEO_TRANSCRIPT_OPTIMIZER") or None
+if DEFAULT_OPTIMIZER is None:
+    DEFAULT_OPTIMIZER = "minimax" if MINIMAX_API_KEY else "none"
 SENSEVOICE_MODEL = os.getenv("SENSEVOICE_MODEL", "iic/SenseVoiceSmall")
 SENSEVOICE_REPO = os.getenv("SENSEVOICE_REPO", "")
 SENSEVOICE_DEVICE = os.getenv("SENSEVOICE_DEVICE", "")
@@ -713,6 +730,143 @@ def clean_markdown_output(text):
     return text
 
 
+# ─── MiniMax 文本校对 ───────────────────────────────────
+
+MINIMAX_OPTIMIZE_SYSTEM_PROMPT = """你是中文音视频逐字稿校对编辑。
+
+任务:修正 ASR 逐字稿中的错别字、同音误识别、明显标点错误和断句问题。
+
+硬性要求:
+- 保留原意、说话顺序、口语表达、语气词和 Markdown 层级。
+- 保留所有时间戳,不得改动时间范围。
+- 不总结、不扩写、不改写成书面文章、不新增事实。
+- 不输出解释,不包裹代码块,只返回修正后的 Markdown 片段。"""
+
+
+def strip_minimax_thinking(text):
+    """MiniMax OpenAI 兼容响应可能把思考放在 <think> 里,这里统一移除。"""
+    return re.sub(r"<think>.*?</think>\s*", "", text or "", flags=re.DOTALL).strip()
+
+
+def split_text_chunks(text, max_chars=MINIMAX_MAX_CHARS):
+    """按 Markdown 段落切块,避免单次校对超过模型输出上限。"""
+    text = text.strip()
+    if not text:
+        return []
+
+    parts = re.split(r"(\n{2,})", text)
+    paragraphs = []
+    for i in range(0, len(parts), 2):
+        para = parts[i]
+        sep = parts[i + 1] if i + 1 < len(parts) else "\n\n"
+        if para:
+            paragraphs.append(para + sep)
+
+    chunks = []
+    buf = ""
+    for para in paragraphs:
+        if len(para) > max_chars:
+            if buf.strip():
+                chunks.append(buf.strip())
+                buf = ""
+            lines = para.splitlines(keepends=True)
+            line_buf = ""
+            for line in lines:
+                if len(line_buf) + len(line) > max_chars and line_buf.strip():
+                    chunks.append(line_buf.strip())
+                    line_buf = ""
+                line_buf += line
+            if line_buf.strip():
+                chunks.append(line_buf.strip())
+            continue
+        if len(buf) + len(para) > max_chars and buf.strip():
+            chunks.append(buf.strip())
+            buf = ""
+        buf += para
+    if buf.strip():
+        chunks.append(buf.strip())
+    return chunks
+
+
+def call_minimax_chat(system_prompt, user_prompt):
+    if not MINIMAX_API_KEY:
+        raise RuntimeError("没找到 MINIMAX_API_KEY,无法使用 MiniMax 优化。")
+
+    endpoint = MINIMAX_BASE_URL.rstrip("/") + "/chat/completions"
+    payload = {
+        "model": MINIMAX_MODEL,
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ],
+        "temperature": 0.2,
+        "top_p": 0.9,
+        "max_completion_tokens": MINIMAX_MAX_COMPLETION_TOKENS,
+    }
+    data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+
+    for attempt in range(MAX_RETRIES):
+        req = urllib.request.Request(
+            endpoint,
+            data=data,
+            headers={
+                "Authorization": f"Bearer {MINIMAX_API_KEY}",
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=300, context=SSL_CONTEXT) as resp:
+                result = json.loads(resp.read().decode("utf-8"))
+            base_resp = result.get("base_resp") if isinstance(result, dict) else None
+            if isinstance(base_resp, dict) and base_resp.get("status_code") not in (None, 0):
+                raise RuntimeError(f"MiniMax 返回错误: {base_resp}")
+            choices = result.get("choices", []) if isinstance(result, dict) else []
+            if choices and choices[0].get("finish_reason") == "length":
+                raise RuntimeError("MiniMax 输出达到长度上限,请调小 MINIMAX_MAX_CHARS 或调大 MINIMAX_MAX_COMPLETION_TOKENS。")
+            content = extract_text_from_response(result)
+            if content:
+                return clean_markdown_output(strip_minimax_thinking(content))
+            raise RuntimeError(f"MiniMax 返回空内容: {json.dumps(result, ensure_ascii=False)[:500]}")
+        except urllib.error.HTTPError as e:
+            body = e.read().decode("utf-8", errors="replace") if e.fp else ""
+            print(f"[WARN] MiniMax 校对失败 (HTTP {e.code}): {body[:300]}", file=sys.stderr)
+        except Exception as e:
+            print(f"[WARN] MiniMax 校对异常: {e}", file=sys.stderr)
+        if attempt < MAX_RETRIES - 1:
+            time.sleep((attempt + 1) * 3)
+
+    raise RuntimeError("MiniMax 校对失败,已达最大重试次数。")
+
+
+def optimize_markdown_with_minimax(markdown_text):
+    chunks = split_text_chunks(markdown_text)
+    if not chunks:
+        return markdown_text
+
+    print(f"[INFO] MiniMax 校对优化: {len(chunks)} 段文本块,模型 {MINIMAX_MODEL}", file=sys.stderr)
+    optimized = []
+    for idx, chunk in enumerate(chunks, 1):
+        print(f"[INFO] MiniMax 校对块 {idx}/{len(chunks)} ({len(chunk)} 字符)", file=sys.stderr)
+        prompt = (
+            "请校对下面这段 Markdown 逐字稿。只修正 ASR 错字、标点和断句,保留时间戳与结构。\n\n"
+            "----- 待校对片段开始 -----\n"
+            f"{chunk}\n"
+            "----- 待校对片段结束 -----"
+        )
+        optimized.append(call_minimax_chat(MINIMAX_OPTIMIZE_SYSTEM_PROMPT, prompt))
+    return "\n\n".join(x.strip() for x in optimized if x.strip()).strip()
+
+
+def optimize_transcript(markdown_text, optimizer):
+    optimizer = (optimizer or "none").lower()
+    if optimizer in ("none", "off", "false", "0"):
+        return markdown_text, "none"
+    if optimizer == "minimax":
+        return optimize_markdown_with_minimax(markdown_text), "minimax"
+    raise RuntimeError(f"未知 optimizer: {optimizer} (可选 none/minimax)")
+
+
 # ─── 分段处理 ─────────────────────────────────────────
 
 def _fmt_mmss(sec):
@@ -936,7 +1090,9 @@ def safe_filename(name, max_len=60):
     return name[:max_len] or "transcript"
 
 
-def run(input_path, title=None, target_mb=None, output_dir=None, images_dir=None, save_md=True, engine=DEFAULT_ENGINE, language="zh"):
+def run(input_path, title=None, target_mb=None, output_dir=None, images_dir=None,
+        save_md=True, engine=DEFAULT_ENGINE, language="zh",
+        optimizer=DEFAULT_OPTIMIZER, print_full=False):
     if not check_ffmpeg():
         print("[ERROR] ffmpeg 未安装!请运行: brew install ffmpeg", file=sys.stderr)
         sys.exit(1)
@@ -1065,7 +1221,14 @@ def run(input_path, title=None, target_mb=None, output_dir=None, images_dir=None
         header = f"# {title}\n\n> 时长 {int(total_duration//60)}:{int(total_duration%60):02d} | 来源: {input_path if is_url(input_path) else os.path.basename(input_path)}\n\n"
     final_md = header + transcript_md
 
-    # 默认存盘到 skill 目录,同时 stdout 直出全文
+    try:
+        final_md, optimizer_used = optimize_transcript(final_md, optimizer)
+    except RuntimeError as e:
+        print(f"[ERROR] {e}", file=sys.stderr)
+        sys.exit(1)
+
+    out_file = None
+    # 默认存盘到配置目录;stdout 默认只出机器可读摘要,避免上层 agent 消耗大量 token
     if save_md:
         out_dir = output_dir or DEFAULT_OUTPUT_DIR
         asset_dir = images_dir or DEFAULT_IMAGES_DIR
@@ -1079,10 +1242,21 @@ def run(input_path, title=None, target_mb=None, output_dir=None, images_dir=None
         print(f"[OK] 图片目录已就绪: {asset_dir}", file=sys.stderr)
 
     print("=" * 55, file=sys.stderr)
-    print("[OK] 转录完成,完整逐字稿见 stdout", file=sys.stderr)
-
-    # stdout 直接输出全文
-    print(final_md)
+    if print_full:
+        print("[OK] 转录完成,完整逐字稿见 stdout", file=sys.stderr)
+        print(final_md)
+    else:
+        print("[OK] 转录完成,stdout 仅输出摘要;如需全文请打开 .md 或加 --print-full", file=sys.stderr)
+        summary = {
+            "status": "ok",
+            "title": title or Path(video_path).stem,
+            "duration_sec": total_duration,
+            "engine": engine,
+            "optimizer": optimizer_used,
+            "transcript_path": out_file,
+            "images_dir": images_dir or DEFAULT_IMAGES_DIR,
+        }
+        print(json.dumps(summary, ensure_ascii=False, indent=2))
 
 
 def doctor():
@@ -1165,6 +1339,14 @@ def doctor():
         print("  ⚠ 没配 DOUBAO_API_KEY (--engine doubao 才需要)")
 
     print(f"  ✓ DOUBAO_MODEL: {MODEL}")
+    print(f"  ✓ VIDEO_TRANSCRIPT_OPTIMIZER: {DEFAULT_OPTIMIZER}")
+    print(f"  ✓ MINIMAX_BASE_URL: {MINIMAX_BASE_URL}")
+    print(f"  ✓ MINIMAX_MODEL: {MINIMAX_MODEL}")
+    if MINIMAX_API_KEY:
+        masked = MINIMAX_API_KEY[:6] + "…" + MINIMAX_API_KEY[-4:] if len(MINIMAX_API_KEY) > 12 else "***"
+        print(f"  ✓ MINIMAX_API_KEY: {masked}")
+    else:
+        print("  ⚠ 没配 MINIMAX_API_KEY (仅 --optimizer minimax 需要)")
 
     print("=" * 55)
     if issues:
@@ -1196,6 +1378,10 @@ def main():
                         help="转写引擎: local=本地 SenseVoice/FunASR, doubao=豆包视频理解 API")
     parser.add_argument("--language", default=os.getenv("SENSEVOICE_LANGUAGE", "zh"),
                         help="本地 SenseVoice 语言,默认 zh; 可设 auto")
+    parser.add_argument("--optimizer", choices=["none", "minimax"], default=DEFAULT_OPTIMIZER,
+                        help="转写后文本优化:none 或 minimax;默认有 MINIMAX_API_KEY 时为 minimax,否则 none")
+    parser.add_argument("--print-full", action="store_true",
+                        help="把完整 Markdown 打印到 stdout;默认只输出 JSON 摘要以节省 agent token")
     parser.add_argument("--doctor", action="store_true",
                         help="体检:检查所有依赖和配置是否就绪")
     parser.set_defaults(save_md=True)
@@ -1210,7 +1396,8 @@ def main():
 
     run(args.input, title=args.title, target_mb=args.target_size,
         output_dir=args.output_dir, images_dir=args.images_dir, save_md=args.save_md,
-        engine=args.engine, language=args.language)
+        engine=args.engine, language=args.language,
+        optimizer=args.optimizer, print_full=args.print_full)
 
 
 if __name__ == "__main__":

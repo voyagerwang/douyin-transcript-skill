@@ -12,9 +12,11 @@ allowed-tools: Read, Write, Edit, Bash, Glob, Grep
 
 # 视频逐字稿提取专家
 
-> 输入视频链接或本地路径 → 自动探测 → 后台下载 → 切片 → 本地 SenseVoice 转录 → Markdown 逐字稿(stdout + 落盘)
+> 输入视频链接或本地路径 → 自动探测 → 后台下载 → 切片 → 本地 SenseVoice 转录 → 可选 MiniMax 校对 → Markdown 逐字稿落盘
 
 默认引擎是 `local`,即本地 SenseVoice/FunASR。只有用户明确要求云端视频理解或传 `--engine doubao` 时,才使用豆包 API。
+
+默认不会把完整逐字稿打印到对话里,只输出 JSON 摘要和文件路径,避免 agent 对话消耗大量 token。若配置了 `MINIMAX_API_KEY`,脚本会默认用 MiniMax 执行转写后的错字/标点/断句校对;没有配置时自动跳过优化。
 
 ## 阶段 0 · 定位 skill 根目录(第一件事)
 
@@ -92,32 +94,35 @@ python3 "$VT_HOME/scripts/transcript.py" "<URL或本地路径>"
 > - 时长 17 分 12 秒,会切成 3 段独立转录
 > - **预估耗时 3 分 20 秒 ~ 5 分 25 秒**,正在跑,稍等...
 
-**(2) 转录完成后必须输出完整逐字稿全文**
+**(2) 转录完成后只给路径和简短状态**
 
-脚本最后会把完整 Markdown 逐字稿打印到 stdout。**你必须把整篇逐字稿原样展示在对话里**,不要只说"已保存到 xxx.md"——那等于用户什么都没看到。
+脚本默认 stdout 只输出 JSON 摘要,其中包含 `transcript_path`。**不要把整篇逐字稿粘贴到对话里**,除非用户明确要求“直接展示全文”。
 
 正确做法:
-1. 抓 stdout 里 `# <标题>` 之后的全部 Markdown
-2. 完整复述给用户(标题、时长、所有段落)
-3. 末尾附一行说明落盘路径,方便用户后续打开 .md 文件
+1. 读取 JSON 摘要里的 `transcript_path`
+2. 告诉用户已完成、使用的转写引擎和优化器、Markdown 文件路径
+3. 如果用户明确要全文,再打开该 Markdown 文件展示;或让脚本加 `--print-full`
 
 错误做法:
-- ❌ "逐字稿已保存到 outputs/xxx.md,请查看文件"
-- ❌ 只展示前几段就省略
-- ❌ 总结/精简内容(逐字稿要逐字展示)
+- ❌ 默认把完整逐字稿复制进对话
+- ❌ 为了优化错别字而把全文交给 agent 自己处理
+- ❌ 总结/精简内容替代逐字稿
 
 ## 阶段 3 · 输出去处
 
-脚本会**两个去处同时输出**:
-1. **stdout 直出**完整 Markdown 全文 — 供 agent 复述给用户(见阶段 2 第 2 条强制要求)
-2. **落盘**到 `VIDEO_TRANSCRIPT_OUTPUT_DIR` 指定目录;未设置时为 `$VT_HOME/outputs/<标题>_transcript.md`
+脚本默认:
+1. **落盘**到 `VIDEO_TRANSCRIPT_OUTPUT_DIR` 指定目录;未设置时为 `$VT_HOME/outputs/<标题>_transcript.md`
+2. **stdout 输出 JSON 摘要** — 包含标题、时长、引擎、优化器、Markdown 路径,供 agent 汇报
 3. **图片资产**统一放到 `VIDEO_TRANSCRIPT_IMAGES_DIR`;未设置时为输出目录下的 `images/`
 
-如果用户要“优化后只保留最终稿”,agent 在脚本完成后应读取 Markdown,做错别字/同音词/断句修正,写回同一路径或另存 `*.optimized.md`,并删除临时 raw/中间文件。不要删除用户显式要求保留的媒体或调试文件。
+如果用户要“优化后只保留最终稿”,优先配置 `MINIMAX_API_KEY` 并让脚本用 `--optimizer minimax` 在本地流程内完成校对,不要把全文交给 agent 自己处理。默认写回同一个最终 Markdown 文件。
 
 **取消落盘**:`--no-save`
 **改保存路径**:`--output-dir <path>`
 **改图片目录**:`--images-dir <path>`
+**强制打印全文**:`--print-full`
+**关闭优化**:`--optimizer none`
+**MiniMax 优化**:`--optimizer minimax`
 
 ### 评估表样例
 
@@ -178,13 +183,23 @@ python3 "$VT_HOME/scripts/transcript.py" "<URL或本地路径>"
 | `--images-dir` | 改图片/封面等资产保存路径 |
 | `--engine` | `local` 或 `doubao`,默认 `local` |
 | `--language` | 本地 SenseVoice 语言,默认 `zh`,可设 `auto` |
+| `--optimizer` | `none` 或 `minimax`;有 `MINIMAX_API_KEY` 时默认 `minimax`,否则 `none` |
+| `--print-full` | 把完整 Markdown 打印到 stdout;默认只输出 JSON 摘要 |
 | `--doctor` | 体检模式:检查依赖+配置 |
 
 ## Notes
 
 - 默认使用本地 SenseVoice/FunASR,不上传视频到云端 ASR
+- 若启用 `--optimizer minimax`,只把文本逐字稿分块发送给 MiniMax 做校对,不上传视频/音频
 - 本地模式时间戳精度为切片级/段落级(不是词级/句级),用于章节定位
-- 默认 stdout 直接输出 Markdown 全文(供上层 agent 展示);**同时**落盘
+- 默认 stdout 只输出 JSON 摘要;完整 Markdown 以落盘文件为准
 - 若需要把输出沉淀到固定知识库目录,设置 `VIDEO_TRANSCRIPT_OUTPUT_DIR`;图片/封面等资产设置 `VIDEO_TRANSCRIPT_IMAGES_DIR`
 - 预估耗时模型(粗估):headless 启动 + 下载 + 本地 ASR,给 ±20% 范围
 - 豆包 API Key 仅 `--engine doubao` 需要,配置存在 `$VT_HOME/.env`(权限 600,gitignore),不会随仓库分发
+- MiniMax API Key 仅 `--optimizer minimax` 需要,推荐配置:
+  ```bash
+  MINIMAX_API_KEY=你的-key
+  MINIMAX_BASE_URL=https://api.minimax.io/v1
+  MINIMAX_MODEL=MiniMax-M2.7
+  VIDEO_TRANSCRIPT_OPTIMIZER=minimax
+  ```

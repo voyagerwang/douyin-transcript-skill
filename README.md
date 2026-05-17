@@ -5,6 +5,8 @@
 
 默认使用 **本地 SenseVoice/FunASR** 转写,不需要豆包 API Key,也不会把视频发给云端 ASR。原来的豆包视频理解仍保留为可选引擎:`--engine doubao`。
 
+转写后的错字、标点和断句优化可以交给 **MiniMax** 执行,避免把整篇逐字稿塞回 Codex/Claude 对话里消耗大量 token。配置 `MINIMAX_API_KEY` 后默认启用;未配置时自动跳过优化。
+
 这个版本整合了原 `douyin-transcript` 的抖音下载兜底:抖音视频会按 `Content-Length` 做 Range 分片下载,并用视频时长校验下载结果,避免半截 mp4 进入后续转写。
 
 ---
@@ -58,6 +60,9 @@ export SENSEVOICE_DEVICE="cpu"                 # 可选: cpu / mps / cuda:0
 export SENSEVOICE_MODEL="iic/SenseVoiceSmall"  # 可选
 export VIDEO_TRANSCRIPT_OUTPUT_DIR="/path/to/Inbox"
 export VIDEO_TRANSCRIPT_IMAGES_DIR="/path/to/Inbox/images"
+export MINIMAX_API_KEY="your-minimax-api-key"   # 可选:转写后文本校对
+export MINIMAX_MODEL="MiniMax-M2.7"             # 可选
+export VIDEO_TRANSCRIPT_OPTIMIZER="minimax"     # 可选:none / minimax
 ```
 
 检查:
@@ -119,9 +124,11 @@ python3 ~/.claude/skills/video-transcript/scripts/transcript.py "<URL>" --engine
 
 ## 📝 输出
 
-逐字稿默认**两个去处**：
-1. **stdout**：完整 Markdown 直接打印（适合 Claude Code 直接展示，或 `| pbcopy`）
-2. **落盘**：`VIDEO_TRANSCRIPT_OUTPUT_DIR/<标题>_transcript.md`；未配置时为 `~/.claude/skills/video-transcript/outputs/`
+逐字稿默认**落盘保存**，stdout 只输出 JSON 摘要，避免上层 agent 消耗大量 token：
+1. **落盘**：`VIDEO_TRANSCRIPT_OUTPUT_DIR/<标题>_transcript.md`；未配置时为 `~/.claude/skills/video-transcript/outputs/`
+2. **stdout**：标题、时长、转写引擎、优化器、Markdown 路径等 JSON 摘要
+
+如果确实要在终端直接打印完整 Markdown,加 `--print-full`。
 
 图片、封面或后续衍生图片统一放到 `VIDEO_TRANSCRIPT_IMAGES_DIR`；未配置时为输出目录下的 `images/`。
 
@@ -140,6 +147,7 @@ python3 ~/.claude/skills/video-transcript/scripts/transcript.py "<URL>" --engine
 
 特性：
 - **本地转写**：默认使用 SenseVoice/FunASR,不调用云 ASR
+- **MiniMax 校对**：可选把文本分块发给 MiniMax 修错字/标点/断句,不上传视频或音频
 - **段落级时间戳**：`[MM:SS - MM:SS]` 方便定位
 - **长视频自动分段**：超 8 分钟切成 6 分钟/段独立转录
 - **可选云引擎**：显式 `--engine doubao` 时才走豆包视频理解
@@ -158,6 +166,8 @@ python3 ~/.claude/skills/video-transcript/scripts/transcript.py "<URL>" --engine
 | `--images-dir` | 改图片/封面等资产输出目录 |
 | `--engine` | `local` 或 `doubao`,默认 `local` |
 | `--language` | 本地 SenseVoice 语言,默认 `zh`,可设 `auto` |
+| `--optimizer` | `none` 或 `minimax`;有 `MINIMAX_API_KEY` 时默认 `minimax`,否则 `none` |
+| `--print-full` | 把完整 Markdown 打印到 stdout;默认只输出 JSON 摘要 |
 | `--doctor` | 体检模式：检查所有依赖+配置 |
 
 ---
@@ -168,13 +178,14 @@ python3 ~/.claude/skills/video-transcript/scripts/transcript.py "<URL>" --engine
 python3 ~/.claude/skills/video-transcript/scripts/transcript.py --doctor
 ```
 
-会逐项检查：ffmpeg / ffprobe / Python / yt-dlp / playwright / chromium / 本地 SenseVoice/FunASR。豆包 API Key 只有 `--engine doubao` 需要。
+会逐项检查：ffmpeg / ffprobe / Python / yt-dlp / playwright / chromium / 本地 SenseVoice/FunASR / MiniMax 配置。豆包 API Key 只有 `--engine doubao` 需要；MiniMax API Key 只有 `--optimizer minimax` 需要。
 
 ### 常见问题
 
 | 现象 | 处理 |
 |---|---|
 | `local SenseVoice/FunASR 未配置` | 设置 `SENSEVOICE_PYTHON` 指向已有 funasr/torch 环境 |
+| `没找到 MINIMAX_API_KEY` | 仅 `--optimizer minimax` 需要;不想优化可传 `--optimizer none` |
 | `[ERROR] 没找到豆包 API Key` | 仅 `--engine doubao` 需要;检查 `.env` |
 | API 报 "模型未授权" / 401 | 火山方舟控制台 → 模型广场 → 给 Doubao-Seed-2.0-pro 点"开通" |
 | 抖音/小红书抓不到视频 | 平台前端可能改版，参考 `FALLBACK.md` 手动方案 |
@@ -217,7 +228,9 @@ python3 ~/.claude/skills/video-transcript/scripts/transcript.py --doctor
   ↓
 合并各段 + 时间戳偏移修正
   ↓
-stdout + 落盘 outputs/
+MiniMax 文本校对(可选)
+  ↓
+落盘 outputs/ + stdout JSON 摘要
 ```
 
 ---
@@ -249,6 +262,7 @@ python3 ~/.claude/skills/video-transcript/scripts/transcript.py --doctor
 
 - 默认本地转写,不会上传视频到云端 ASR
 - 临时视频和音频只在本机处理
+- 启用 MiniMax 校对时,只上传文本逐字稿片段,不上传视频/音频
 - 只有显式 `--engine doubao` 时才会把压缩后视频发给豆包 API
 
 ---
