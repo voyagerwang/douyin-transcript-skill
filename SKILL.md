@@ -199,7 +199,7 @@ python3 "$VT_HOME/scripts/transcript.py" "<URL或本地路径>"
 - MiniMax API Key 仅 `--optimizer minimax` 需要,推荐配置:
   ```bash
   MINIMAX_API_KEY=你的-key
-  MINIMAX_BASE_URL=https://api.minimax.io/v1
+  MINIMAX_BASE_URL=https://api.minimaxi.com/v1  # 国内 Key 用 minimaxi.com;海外 Key 用 minimax.io
   MINIMAX_MODEL=MiniMax-M2.7
   VIDEO_TRANSCRIPT_OPTIMIZER=minimax
   ```

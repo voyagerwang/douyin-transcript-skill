@@ -61,6 +61,7 @@ export SENSEVOICE_MODEL="iic/SenseVoiceSmall"  # 可选
 export VIDEO_TRANSCRIPT_OUTPUT_DIR="/path/to/Inbox"
 export VIDEO_TRANSCRIPT_IMAGES_DIR="/path/to/Inbox/images"
 export MINIMAX_API_KEY="your-minimax-api-key"   # 可选:转写后文本校对
+export MINIMAX_BASE_URL="https://api.minimaxi.com/v1"  # 国内 Key 用 minimaxi.com;海外 Key 用 minimax.io
 export MINIMAX_MODEL="MiniMax-M2.7"             # 可选
 export VIDEO_TRANSCRIPT_OPTIMIZER="minimax"     # 可选:none / minimax
 ```
@@ -186,6 +187,7 @@ python3 ~/.claude/skills/video-transcript/scripts/transcript.py --doctor
 |---|---|
 | `local SenseVoice/FunASR 未配置` | 设置 `SENSEVOICE_PYTHON` 指向已有 funasr/torch 环境 |
 | `没找到 MINIMAX_API_KEY` | 仅 `--optimizer minimax` 需要;不想优化可传 `--optimizer none` |
+| MiniMax 报 `invalid api key (2049)` | 先确认 Key 有效;中国区 Key 通常要设 `MINIMAX_BASE_URL=https://api.minimaxi.com/v1` |
 | `[ERROR] 没找到豆包 API Key` | 仅 `--engine doubao` 需要;检查 `.env` |
 | API 报 "模型未授权" / 401 | 火山方舟控制台 → 模型广场 → 给 Doubao-Seed-2.0-pro 点"开通" |
 | 抖音/小红书抓不到视频 | 平台前端可能改版，参考 `FALLBACK.md` 手动方案 |

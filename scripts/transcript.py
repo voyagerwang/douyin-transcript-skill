@@ -831,6 +831,8 @@ def call_minimax_chat(system_prompt, user_prompt):
         except urllib.error.HTTPError as e:
             body = e.read().decode("utf-8", errors="replace") if e.fp else ""
             print(f"[WARN] MiniMax 校对失败 (HTTP {e.code}): {body[:300]}", file=sys.stderr)
+            if e.code == 401 and "2049" in body and "api.minimax.io" in MINIMAX_BASE_URL:
+                print("[WARN] 如果使用中国区 MiniMax Key,请设置 MINIMAX_BASE_URL=https://api.minimaxi.com/v1", file=sys.stderr)
         except Exception as e:
             print(f"[WARN] MiniMax 校对异常: {e}", file=sys.stderr)
         if attempt < MAX_RETRIES - 1:
@@ -1343,8 +1345,7 @@ def doctor():
     print(f"  ✓ MINIMAX_BASE_URL: {MINIMAX_BASE_URL}")
     print(f"  ✓ MINIMAX_MODEL: {MINIMAX_MODEL}")
     if MINIMAX_API_KEY:
-        masked = MINIMAX_API_KEY[:6] + "…" + MINIMAX_API_KEY[-4:] if len(MINIMAX_API_KEY) > 12 else "***"
-        print(f"  ✓ MINIMAX_API_KEY: {masked}")
+        print("  ✓ MINIMAX_API_KEY: 已配置")
     else:
         print("  ⚠ 没配 MINIMAX_API_KEY (仅 --optimizer minimax 需要)")
 
